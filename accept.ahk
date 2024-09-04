@@ -2,8 +2,8 @@
 SendMode Input
 SetWorkingDir, %A_ScriptDir%
 
-imagePath := "accept.png"
-tolerance := 98 ; Adjust
+imagePath := "images/accept.png"
+tolerance := 100 ; Adjust
 CoordMode, Window
 
 Loop
@@ -12,7 +12,7 @@ Loop
     if !ErrorLevel
     {
         sleep, 500
-        Click, 800, 750
+        Click, 800, 700
         break
     }
     Sleep, 500

@@ -1,38 +1,102 @@
 import cv2
+import os
 import numpy as np
 import pyautogui
 import pygetwindow as gw
 import tkinter as tk
 from tkinter import scrolledtext
+from tkinter import ttk
 import time
 import keyboard 
 import logging
 import queue
+import requests
 
 # Initialize global variables with default values
 pick = True
 ban = True
-accept = True
+accept = False
 pick_choice = ""
 ban_choice = ""
 
 sleepTime = 1
+inputDelay = 1 
 
-# Set the path to images and tolerance
+# Set the path to images
 images = {
     "accept": "images/accept.png",
     "pick": "images/pick.png",
     "ban": "images/ban.png"
 }
-tolerance = 0.8  # Tolerance level for matching
+
+# Tolerance level for matching
+tolerance = 0.8  
 
 # Coordinates relative to the window
 coordinates = {
     "search_bar": (950, 130),
-    "champ": (500, 200),
+    "champ": (450, 180),
     "button": (800, 750),
-    "accept": (800, 750)
+    "accept": (800, 700),
+    "bans" : (1600, 100)
 }
+
+def get_latest_version():
+    version_url = "https://ddragon.leagueoflegends.com/api/versions.json"
+    response = requests.get(version_url)
+    if response.status_code == 200:
+        versions = response.json()
+        return versions[0]  # return the first version
+
+def get_champion_names(version):
+    champion_url = f"https://ddragon.leagueoflegends.com/cdn/{version}/data/en_US/champion.json"
+    response = requests.get(champion_url)
+    if response.status_code == 200:
+        champion_data = response.json()
+        champions = champion_data.get('data', {})
+        # Extract only the names of the champions
+        return [champ['name'] for champ in champions.values()]
+    else:
+        return []
+
+def clean_champion_name(name):
+    # Wukong.png does not exist?
+    # Convert to lowercase
+    name = name.lower()
+    # for Nunu&Willump the png is called Nunu 
+    if '&' in name:
+        name = name.split('&')[0]
+    # for renata its just called "renata"
+    if "renata" in name: 
+        name = name.split(' ')[0]
+    name = name.replace(' ', '').replace("'", '').replace('.', '')
+    return name
+    
+
+def download_champion_images(version, save_directory):
+    if not os.path.exists(save_directory):
+        os.makedirs(save_directory)
+        
+    for champ_name in champion_names:
+        cleaned_name = clean_champion_name(champ_name)
+        image_path = os.path.join(save_directory, f"{cleaned_name}.png")
+        
+        if os.path.exists(image_path):
+            logger.debug(f"Image already exists for {cleaned_name}")
+            continue
+        
+        image_url = f"https://ddragon.leagueoflegends.com/cdn/{version}/img/champion/{cleaned_name}.png"
+        response = requests.get(image_url)
+        
+        if response.status_code == 200:
+            with open(image_path, 'wb') as file:
+                file.write(response.content)
+            logger.debug(f"Downloaded champion image {cleaned_name}")
+        else:
+            logger.debug(f"Failed to download {cleaned_name}, response code: {response.status_code}")
+        
+        # Add a delay to avoid throttling
+        time.sleep(sleepTime)
 
 def activate_window(title):
     """Activate the window with the given title."""
@@ -72,42 +136,71 @@ def image_search(image_file, window_title):
         return None
 
 
-def gui():
+def gui(champion_names):
     """Create and display a centered GUI window for user input."""
     
+    def filter_combobox(event, combobox, all_values):
+        # Get the current text from the combobox
+        search_text = combobox.get()
+        
+        # Filter the options based on the current text
+        filtered_options = [name for name in all_values if search_text.lower() in name.lower()]
+        
+        # Update the combobox options
+        combobox['values'] = filtered_options
+        # Optionally, set the cursor to the end of the input text
+        combobox.icursor(tk.END)
+        
+    def on_focus(event):
+        combobox = event.widget
+        combobox.event_generate('<Down>')   
+        
     def on_submit():
         global pick, ban, accept, pick_choice, ban_choice
         pick = pick_var.get()
         ban = ban_var.get()
         accept = accept_var.get()
-        pick_choice = pick_choice_entry.get()
-        ban_choice = ban_choice_entry.get()
+        pick_choice = pick_choice_combobox.get()
+        ban_choice = ban_choice_combobox.get()
         root.destroy()
 
     root = tk.Tk()
     root.title("Pick/Ban/Accept Selection")
 
     # Define the input fields and buttons
+
+    # Pick Choice Combobox (with autocomplete)
     tk.Label(root, text="Pick Choice:").grid(row=0, column=0, padx=10, pady=10)
-    pick_choice_entry = tk.Entry(root)
-    pick_choice_entry.grid(row=0, column=1, padx=10, pady=10)
+    pick_choice_combobox = ttk.Combobox(root, values=champion_names)
+    pick_choice_combobox.grid(row=0, column=1, padx=10, pady=10)
+    pick_choice_combobox.set('')  # Empty initial value
+    pick_choice_combobox.bind('<KeyRelease>', lambda event: filter_combobox(event, pick_choice_combobox, champion_names))
 
+
+    # Ban Choice Combobox (with autocomplete)
     tk.Label(root, text="Ban Choice:").grid(row=1, column=0, padx=10, pady=10)
-    ban_choice_entry = tk.Entry(root)
-    ban_choice_entry.grid(row=1, column=1, padx=10, pady=10)
+    ban_choice_combobox = ttk.Combobox(root, values=champion_names)
+    ban_choice_combobox.grid(row=1, column=1, padx=10, pady=10)
+    ban_choice_combobox.set('')  # Empty initial value
+    ban_choice_combobox.bind('<KeyRelease>', lambda event: filter_combobox(event, ban_choice_combobox, champion_names))
 
+    # Pick Checkbox
     tk.Label(root, text="Pick").grid(row=2, column=0, padx=10, pady=10)
     pick_var = tk.BooleanVar(value=pick)
     tk.Checkbutton(root, variable=pick_var).grid(row=2, column=1, padx=10, pady=10)
 
+    # Ban Checkbox
     tk.Label(root, text="Ban").grid(row=3, column=0, padx=10, pady=10)
     ban_var = tk.BooleanVar(value=ban)
     tk.Checkbutton(root, variable=ban_var).grid(row=3, column=1, padx=10, pady=10)
 
+    # Accept Checkbox (disabled)
     tk.Label(root, text="Accept").grid(row=4, column=0, padx=10, pady=10)
     accept_var = tk.BooleanVar(value=accept)
     tk.Checkbutton(root, variable=accept_var, state=tk.DISABLED).grid(row=4, column=1, padx=10, pady=10)
+    #, state=tk.DISABLED
 
+    # Submit Button
     tk.Button(root, text="Submit", command=on_submit).grid(row=5, column=0, columnspan=2, pady=10)
 
     # Center the window on the screen
@@ -122,10 +215,10 @@ def gui():
     
     root.mainloop()
 
-def perform_action(image_key, input_text, window_title):
+def search_and_click(image_key, input_text, window_title):
     """Search for an image and perform click actions."""
-    logger.debug(f"Looking for {image_key} in window '{window_title}'")
-    
+    logger.info(f"Looking for {images[image_key]} in window '{window_title}'")
+    activate_window("League of Legends")
     try:
         window = gw.getWindowsWithTitle(window_title)[0]
         while True:
@@ -136,7 +229,6 @@ def perform_action(image_key, input_text, window_title):
             location = image_search(images[image_key], window_title)
             if location:
                 logger.debug(f"Found the image: {image_key}")
-                time.sleep(1)
 
                 # Convert relative coordinates to absolute coordinates
                 abs_coords = {
@@ -144,13 +236,16 @@ def perform_action(image_key, input_text, window_title):
                     for name, (x, y) in coordinates.items()
                 }
 
-                # Perform actions
+                time.sleep(inputDelay)
                 pyautogui.click(*abs_coords["search_bar"])
-                time.sleep(1)
+                time.sleep(inputDelay)
+                # make sure previous input is cleared
+                pyautogui.hotkey('ctrl', 'a')
+                pyautogui.press('backspace')
                 pyautogui.write(input_text, interval=0.1)
-                time.sleep(1)
+                time.sleep(inputDelay)
                 pyautogui.click(*abs_coords["champ"])
-                time.sleep(1)
+                time.sleep(inputDelay)
                 pyautogui.click(*abs_coords["button"])
                 break
             else:
@@ -223,7 +318,6 @@ def create_log_window(existing_logger):
     tk.Radiobutton(root, text="DEBUG", variable=log_level_var, value="DEBUG", command=on_change_log_level).pack(anchor=tk.W)
     tk.Radiobutton(root, text="INFO", variable=log_level_var, value="INFO", command=on_change_log_level).pack(anchor=tk.W)
 
-
     log_level_label = tk.Label(root, text="Current Log Level: DEBUG")
     log_level_label.pack(padx=10, pady=5)
 
@@ -241,23 +335,40 @@ def create_log_window(existing_logger):
 
     root.mainloop()
 
-
 # Configure logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger()
 #create_log_window(logger)
 
-# Execute GUI for user input
-gui()
+latest_version = get_latest_version()
+champion_names = get_champion_names(latest_version)
+logger.info(f"Latest Version: {latest_version} NumChamps: {len(champion_names)}")
+
+champ_image_dir = "images/champs"
+files_in_dir = [f for f in os.listdir(champ_image_dir) if os.path.isfile(os.path.join(champ_image_dir, f))]
+
+
+if len(champion_names) != len(files_in_dir)-1:
+    logger.debug(f"More champs in this patch, downloading new champ icons")
+    download_champion_images(latest_version, "images/champs")
+
+gui(champion_names)
+
+logger.info(f"pick: {pick} ban: {ban} accept: {accept}")
+logger.info(f"pick_choice: {pick_choice} ban_choice: {ban_choice}")
 
 # Activate the target window
 #activate_window("League of Legends")
 
+## check there are 
+
+
 # Look for the "Accept" image if Accept is enabled
 if accept:
+    logger.info(f"Searching for {images["accept"]}")
     while True:
         if keyboard.is_pressed('esc'):  # Check for escape key
-            print("Escape key pressed. Exiting...")
+            logger.info(f"Escape key pressed. Exiting...")
             break
 
         if image_search(images["accept"], "League of Legends"):
@@ -269,11 +380,17 @@ if accept:
             break
         else:
            logger.debug(f"Image {"accept"} not found, retrying in {sleepTime}s")
-        time.sleep(1)
+        time.sleep(sleepTime)
+else: 
+    logger.warning(f"Not accepting, accept option is: {accept}")
 
-# Perform actions for Pick and Ban if enabled
-if pick:
-    perform_action("pick", pick_choice, "League of Legends")
+# Perform actions for Pick and Ban if enabled and input for pick/ban
+if pick and pick_choice != "" and ban_choice != pick_choice:
+    search_and_click("pick", pick_choice, "League of Legends")
+else:
+    logger.warning(f"Not picking, no champ selected, or pick is the same as ban: {ban_choice}")
 
-if ban:
-    perform_action("ban", ban_choice, "League of Legends")
+if ban and ban_choice != "" and ban_choice != pick_choice:
+    search_and_click("ban", ban_choice, "League of Legends")
+else:
+    logger.warning(f"Not banning, no champ selected, or pick is the same as ban: {ban_choice}")

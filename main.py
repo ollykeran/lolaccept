@@ -394,3 +394,9 @@ if ban and ban_choice != "" and ban_choice != pick_choice:
     search_and_click("ban", ban_choice, "League of Legends")
 else:
     logger.warning(f"Not banning, no champ selected, or pick is the same as ban: {ban_choice}")
+
+## hotfix for hover champ   
+if pick and pick_choice != "" and ban_choice != pick_choice:
+    search_and_click("pick", pick_choice, "League of Legends")
+else:
+    logger.warning(f"Not picking, no champ selected, or pick is the same as ban: {ban_choice}")
